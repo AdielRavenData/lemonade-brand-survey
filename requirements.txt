@@ -1,0 +1,6 @@
+Flask==2.3.3
+google-cloud-bigquery
+google-cloud-storage
+pandas
+pyarrow
+functions-framework
