@@ -198,9 +198,3 @@ if __name__ == "__main__":
     # For Cloud Run
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port, debug=False)
-else:
-    # For functions framework
-    import functions_framework
-    @functions_framework.http
-    def main(request):
-        return app(request.environ, lambda x,y: None)

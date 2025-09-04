@@ -694,8 +694,7 @@ class SurveyProcessor:
                         
                         tracker.mark_processed(
                             filename=csv_filename,
-                            survey_type=survey_type,
-                            metrics=metrics
+                            survey_type=survey_type
                         )
                         
                         csv_files_processed.append(csv_filename)

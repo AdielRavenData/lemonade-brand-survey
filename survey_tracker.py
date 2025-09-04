@@ -72,38 +72,21 @@ class SurveyTracker:
             # If we can't check, assume not processed to avoid skipping
             return False
 
-    def mark_processed(self, filename: str, survey_type: str, metrics: Dict):
+    def mark_processed(self, filename: str, survey_type: str):
         """
-        Mark CSV file as processed
+        Mark CSV file as processed with simple filename-only schema
         
         Args:
             filename: CSV filename
-            survey_type: "BRAND_TRACKER" or "CUSTOM" 
-            metrics: Metrics dictionary
+            survey_type: "BRAND_TRACKER" or "CUSTOM"
         """
         try:
             table_id = self.brand_table_id if survey_type == "BRAND_TRACKER" else self.custom_table_id
             
-            # Prepare simplified row data
+            # Simple row data with just filename
             row_data = {
-                'filename': filename,
-                'processed_timestamp': datetime.now().isoformat(),
-                'group_type': metrics.get('group_type'),
-                'group_number': str(metrics.get('group_number', ''))
+                'filename': filename
             }
-            
-            # Add question-specific response counts
-            if survey_type == "BRAND_TRACKER":
-                row_data.update({
-                    'q1_response_count': int(metrics.get('q1_response_count', 0)),
-                    'q2_response_count': int(metrics.get('q2_response_count', 0)),
-                    'q3_response_count': int(metrics.get('q3_response_count', 0))
-                })
-            else:
-                row_data.update({
-                    'q1_response_count': int(metrics.get('q1_response_count', 0)),
-                    'q2_response_count': int(metrics.get('q2_response_count', 0))
-                })
             
             # Convert to DataFrame for BigqueryClient.load_table
             df = pd.DataFrame([row_data])
