@@ -38,8 +38,7 @@ class SurveyProcessor:
         self.bq_client = BigqueryClient(creds=None, config={})
         self.client = self.bq_client.client  # Keep backwards compatibility
         
-        # Initialize tracker and cleaner
-        self.tracker = SurveyTracker(project_id)
+        # Initialize cleaner (tracker will be passed in)
         self.cleaner = CustomSurveyDataCleaner()
         
         # Load DMA mapping (embedded to avoid file dependencies)
@@ -58,6 +57,17 @@ class SurveyProcessor:
         }
         
         logger.info("🚀 Survey processor initialized for Cloud Run")
+    
+    def clear_memory_cache(self):
+        """Clear any memory caches in the processor"""
+        import gc
+        # Force garbage collection (double pass for thorough cleanup)
+        gc_count_1 = gc.collect()
+        gc_count_2 = gc.collect()
+        if gc_count_2 > 0:
+            logger.info(f"🧹 Processor cache cleared: freed {gc_count_1 + gc_count_2} objects")
+        else:
+            logger.info(f"🧹 Processor cache cleared: freed {gc_count_1} objects")
 
     def _get_table_schema(self, table_name):
         """Get explicit BigQuery schema for tables to prevent autodetect conflicts"""
@@ -478,55 +488,54 @@ class SurveyProcessor:
         return custom_tables
 
     def upload_to_bigquery(self, df, table_name, dataset_id):
-        """Upload DataFrame to BigQuery using BigqueryClient.load_table"""
+        """Upload DataFrame to BigQuery using BigqueryClient.load_table - Memory optimized"""
         if df.empty:
             logger.warning(f"Empty DataFrame for table {table_name}")
             return 0
         
         table_id = f"{self.project_id}.{dataset_id}.{table_name}"
+        original_rows = len(df)
         
         try:
-            # Create a copy to avoid modifying original DataFrame
-            df_upload = df.copy()
-            
+            # Work directly on the DataFrame to avoid copying large data
             # Basic data type fixes for compatibility
-            if 'Group' in df_upload.columns:
-                df_upload['Group'] = df_upload['Group'].astype(str)
+            if 'Group' in df.columns:
+                df['Group'] = df['Group'].astype(str)
             
-            if 'session_weight' in df_upload.columns:
-                df_upload['session_weight'] = pd.to_numeric(df_upload['session_weight'], errors='coerce').fillna(1.0)
+            if 'session_weight' in df.columns:
+                df['session_weight'] = pd.to_numeric(df['session_weight'], errors='coerce').fillna(1.0)
             
-            if 'count_response' in df_upload.columns:
-                df_upload['count_response'] = pd.to_numeric(df_upload['count_response'], errors='coerce').fillna(0).astype(int)
+            if 'count_response' in df.columns:
+                df['count_response'] = pd.to_numeric(df['count_response'], errors='coerce').fillna(0).astype(int)
             
-            if 'Weighted_Response' in df_upload.columns:
-                df_upload['Weighted_Response'] = pd.to_numeric(df_upload['Weighted_Response'], errors='coerce').fillna(0.0).astype(float)
+            if 'Weighted_Response' in df.columns:
+                df['Weighted_Response'] = pd.to_numeric(df['Weighted_Response'], errors='coerce').fillna(0.0).astype(float)
             
             # Convert datetime columns to string
-            datetime_columns = df_upload.select_dtypes(include=['datetime64']).columns
+            datetime_columns = df.select_dtypes(include=['datetime64']).columns
             for col in datetime_columns:
-                df_upload[col] = df_upload[col].astype(str)
+                df[col] = df[col].astype(str)
             
             # Ensure date columns are strings
             date_columns = ['survey_date', 'processed_date', 'survey_dates']
             for col in date_columns:
-                if col in df_upload.columns:
-                    df_upload[col] = df_upload[col].astype(str)
+                if col in df.columns:
+                    df[col] = df[col].astype(str)
                     # Clean up date format
-                    df_upload[col] = df_upload[col].str.replace(r'\s.*', '', regex=True)
+                    df[col] = df[col].str.replace(r'\s.*', '', regex=True)
             
-            logger.info(f"🔍 Uploading {len(df_upload)} rows to {table_name} using BigqueryClient")
+            logger.info(f"🔍 Uploading {original_rows} rows to {table_name} using BigqueryClient")
             
             # Use BigqueryClient.load_table method
             self.bq_client.load_table(
-                data=df_upload,
+                data=df,
                 table_id=table_id,
                 detect_schema=True,  # Let BigQuery detect schema
                 to_truncate=False    # Append mode
             )
             
-            logger.info(f"✅ Successfully uploaded {len(df_upload)} rows to {table_name}")
-            return len(df_upload)
+            logger.info(f"✅ Successfully uploaded {original_rows} rows to {table_name}")
+            return original_rows
             
         except Exception as e:
             logger.error(f"❌ Failed to upload to {table_name}: {e}")
@@ -620,6 +629,10 @@ class SurveyProcessor:
                     # Process this CSV file
                     logger.info(f"🔄 Processing CSV: {csv_filename}")
                     try:
+                        # Monitor memory before processing
+                        pre_csv_memory = psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024
+                        logger.info(f"🧠 Memory before CSV: {pre_csv_memory:.1f} MB")
+                        
                         study_id = self.extract_study_id_from_csv_name(csv_filename)
                         df = pd.read_csv(csv_file)
                         logger.info(f"📊 Loaded CSV with {len(df)} rows, {df.memory_usage(deep=True).sum() / 1024 / 1024:.1f} MB")
@@ -702,14 +715,36 @@ class SurveyProcessor:
                         csv_files_processed.append(csv_filename)
                         logger.info(f"✅ Successfully processed CSV: {csv_filename}")
                         
-                        # Efficient memory cleanup after each file
+                        # Aggressive memory cleanup after each file
                         import gc
+                        
+                        # Delete main dataframes
                         del df
-                        if survey_type == "BRAND_TRACKER" and 'brand_data' in locals():
-                            del brand_data
-                        elif survey_type == "CUSTOM" and 'custom_data' in locals():
-                            del custom_data
-                        gc.collect()
+                        
+                        # Delete processed data based on survey type
+                        if survey_type == "BRAND_TRACKER":
+                            if 'brand_data' in locals():
+                                del brand_data
+                            if 'question_tables' in locals():
+                                for table_name, table_df in question_tables.items():
+                                    del table_df
+                                del question_tables
+                        else:  # CUSTOM
+                            if 'custom_data' in locals():
+                                del custom_data
+                            if 'custom_tables' in locals():
+                                for table_name, table_df in custom_tables.items():
+                                    del table_df
+                                del custom_tables
+                        
+                        # Force garbage collection
+                        # Run twice: first pass cleans immediate refs, second pass cleans circular refs
+                        gc_count_1 = gc.collect()
+                        gc_count_2 = gc.collect()
+                        if gc_count_2 > 0:
+                            logger.debug(f"🔄 GC: 1st pass freed {gc_count_1}, 2nd pass freed {gc_count_2} objects")
+                        else:
+                            logger.debug(f"🔄 GC: freed {gc_count_1} objects")
                         
                         # Log memory after cleanup
                         current_memory = psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024
@@ -722,10 +757,16 @@ class SurveyProcessor:
                 # Remove duplicates from tables_updated
                 tables_updated = list(set(tables_updated))
                 
+                # Final ZIP-level memory cleanup
+                import gc
+                gc.collect()
+                gc.collect()
+                
                 # Log final memory usage
                 end_memory = process.memory_info().rss / 1024 / 1024
                 memory_diff = end_memory - start_memory
-                logger.info(f"🧠 Final memory usage: {end_memory:.1f} MB (change: {memory_diff:+.1f} MB)")
+                logger.info(f"🧠 Final ZIP memory: {end_memory:.1f} MB (change: {memory_diff:+.1f} MB)")
+                logger.info(f"📦 ZIP processing complete - memory cleaned")
                 
                 return {
                     "status": "success",

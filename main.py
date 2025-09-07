@@ -97,6 +97,10 @@ def process_uploaded_file(bucket_name, file_name):
                 logger.info(f"📊 CSV files processed: {result['csv_files_processed']}")
                 logger.info(f"📊 CSV files skipped: {result['csv_files_skipped']}")
                 logger.info(f"📊 Tables updated: {', '.join(result['tables_updated'])}")
+                
+                # Clear processor memory cache after successful processing
+                processor.clear_memory_cache()
+                
                 return {
                     "status": "success",
                     "survey_type": survey_type,
