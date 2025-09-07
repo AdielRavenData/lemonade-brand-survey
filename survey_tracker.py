@@ -89,12 +89,15 @@ class SurveyTracker:
             file_identifier = self._create_file_identifier(filename, survey_type)
             table_id = self.brand_table_id if survey_type == "BRAND_TRACKER" else self.custom_table_id
             
-            # Use BigqueryClient's run_query_to_df method
+            # Use standard BigQuery client query method (avoids Storage Read API permissions)
             query = f"SELECT file FROM `{table_id}` WHERE file = '{file_identifier}'"
-            df = self.bq_client.run_query_to_df(query, log_msg=f"Checking if {file_identifier} is processed")
+            logger.debug(f"🔍 Executing query: {query}")
+            
+            query_job = self.bq_client.client.query(query)
+            results = list(query_job)
             
             # Return True if any rows found
-            is_found = len(df) > 0
+            is_found = len(results) > 0
             if is_found:
                 logger.info(f"✅ File already processed: {file_identifier}")
             else:
