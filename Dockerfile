@@ -10,11 +10,14 @@ ENV PORT=8080
 WORKDIR /app
 
 # Install system dependencies
+ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        gcc \
-        g++ \
-        && rm -rf /var/lib/apt/lists/*
+ && apt-get install -y --no-install-recommends \
+      git \
+      ca-certificates \
+      gcc \
+      g++ \
+ && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first to leverage Docker cache
 COPY requirements.txt .
@@ -24,9 +27,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Install Raven Utils with authentication
 # Note: Pass token as build arg: docker build --build-arg GITHUB_TOKEN=your_token .
-ARG GITHUB_USER=roihezkiRaven
+ARG GITHUB_USER
 ARG GITHUB_TOKEN
-RUN pip install git+https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/AdminRavenData/Raven_Utils.git@main
+RUN pip install --no-cache-dir \
+  "git+https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/AdminRavenData/Raven_Utils.git@main"
 
 # Copy project files
 COPY . .
