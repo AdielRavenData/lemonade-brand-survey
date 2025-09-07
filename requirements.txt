@@ -6,3 +6,4 @@ pyarrow==21.0.0
 functions-framework
 psutil==5.9.8
 gunicorn==21.2.0
+requests==2.31.0

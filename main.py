@@ -15,6 +15,7 @@ import time
 
 from survey_processor import SurveyProcessor
 from survey_tracker import SurveyTracker
+from slack_notifier import SlackNotifier
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -35,6 +36,7 @@ logger.info("🚀 Initializing shared components at startup...")
 shared_tracker = SurveyTracker(PROJECT_ID)
 shared_processor = SurveyProcessor(PROJECT_ID, BRAND_DATASET, CUSTOM_DATASET)
 shared_storage_client = CloudStorageClient(creds=None, headers_json=None)
+shared_slack_notifier = SlackNotifier()  # Will use SLACK_WEBHOOK_URL env var
 logger.info("✅ Shared components initialized")
 
 def process_uploaded_file(bucket_name, file_name):
@@ -54,11 +56,17 @@ def process_uploaded_file(bucket_name, file_name):
     tracker = shared_tracker
     processor = shared_processor  
     storage_client = shared_storage_client
+    slack = shared_slack_notifier
+    
+    # Track processing time for notifications
+    start_time = time.time()
     
     try:
         # Check if file is a ZIP
         if not file_name.endswith('.zip'):
             logger.info(f"⏭️  Skipping non-ZIP file: {file_name}")
+            # Send skipped notification
+            slack.send_skipped_notification(file_name, "Not a ZIP file")
             return {"status": "skipped", "reason": "not_zip_file"}
         
         # We'll check individual CSV files after extracting ZIP
@@ -93,10 +101,23 @@ def process_uploaded_file(bucket_name, file_name):
             )
             
             if result["status"] == "success":
+                processing_time = time.time() - start_time
+                
                 logger.info(f"✅ Successfully processed: {file_name}")
                 logger.info(f"📊 CSV files processed: {result['csv_files_processed']}")
                 logger.info(f"📊 CSV files skipped: {result['csv_files_skipped']}")
                 logger.info(f"📊 Tables updated: {', '.join(result['tables_updated'])}")
+                
+                # Send success notification to Slack
+                slack.send_success_notification(
+                    file_name=file_name,
+                    survey_type=survey_type,
+                    csv_files_processed=result['csv_files_processed'],
+                    csv_files_skipped=result['csv_files_skipped'],
+                    tables_updated=result['tables_updated'],
+                    records_added=result.get('records_added', {}),
+                    processing_time=processing_time
+                )
                 
                 # Clear processor memory cache after successful processing
                 processor.clear_memory_cache()
@@ -110,11 +131,35 @@ def process_uploaded_file(bucket_name, file_name):
                     "records_added": result.get('records_added', {})
                 }
             else:
-                logger.error(f"❌ Processing failed: {result.get('error', 'Unknown error')}")
+                processing_time = time.time() - start_time
+                error_msg = result.get('error', 'Unknown error')
+                
+                logger.error(f"❌ Processing failed: {error_msg}")
+                
+                # Send failure notification to Slack
+                slack.send_failure_notification(
+                    file_name=file_name,
+                    error=error_msg,
+                    survey_type=survey_type,
+                    processing_time=processing_time
+                )
+                
                 return {"status": "error", "reason": result.get('error', 'processing_failed')}
     
     except Exception as e:
+        processing_time = time.time() - start_time
+        error_msg = f"Unexpected error: {str(e)}"
+        
         logger.error(f"❌ Unexpected error processing {file_name}: {str(e)}", exc_info=True)
+        
+        # Send failure notification to Slack
+        slack.send_failure_notification(
+            file_name=file_name,
+            error=error_msg,
+            survey_type=survey_type if 'survey_type' in locals() else None,
+            processing_time=processing_time
+        )
+        
         return {"status": "error", "reason": f"unexpected_error: {str(e)}"}
 
 @app.route("/", methods=["POST"])
@@ -204,6 +249,19 @@ def test_processing():
     except Exception as e:
         logger.error(f"❌ Test error: {str(e)}", exc_info=True)
         return f"Test Error: {str(e)}", 500
+
+@app.route("/test-slack", methods=["GET"])
+def test_slack():
+    """Test Slack notifications"""
+    try:
+        success = shared_slack_notifier.test_notification()
+        if success:
+            return "✅ Slack test notification sent successfully", 200
+        else:
+            return "❌ Slack test notification failed", 500
+    except Exception as e:
+        logger.error(f"❌ Slack test error: {str(e)}", exc_info=True)
+        return f"Slack Test Error: {str(e)}", 500
 
 if __name__ == "__main__":
     # For Cloud Run
