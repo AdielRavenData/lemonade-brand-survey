@@ -30,6 +30,13 @@ CUSTOM_DATASET = "new_custom_brand_survey"
 # Simple in-memory deduplication (resets when container restarts)
 recent_files = {}
 
+# PERFORMANCE FIX: Initialize components once at startup, not per request
+logger.info("🚀 Initializing shared components at startup...")
+shared_tracker = SurveyTracker(PROJECT_ID)
+shared_processor = SurveyProcessor(PROJECT_ID, BRAND_DATASET, CUSTOM_DATASET)
+shared_storage_client = CloudStorageClient(creds=None, headers_json=None)
+logger.info("✅ Shared components initialized")
+
 def process_uploaded_file(bucket_name, file_name):
     """
     Process a newly uploaded ZIP file
@@ -43,10 +50,10 @@ def process_uploaded_file(bucket_name, file_name):
     """
     logger.info(f"🔥 Processing upload: {bucket_name}/{file_name}")
     
-    # Initialize components
-    tracker = SurveyTracker(PROJECT_ID)
-    processor = SurveyProcessor(PROJECT_ID, BRAND_DATASET, CUSTOM_DATASET)
-    storage_client = CloudStorageClient(creds=None, headers_json=None)
+    # Use shared components (initialized at startup)
+    tracker = shared_tracker
+    processor = shared_processor  
+    storage_client = shared_storage_client
     
     try:
         # Check if file is a ZIP

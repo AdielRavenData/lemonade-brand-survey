@@ -702,15 +702,18 @@ class SurveyProcessor:
                         csv_files_processed.append(csv_filename)
                         logger.info(f"✅ Successfully processed CSV: {csv_filename}")
                         
-                        # Force garbage collection after each file
-                        del df
-                        if 'brand_data' in locals():
-                            del brand_data
-                        if 'custom_data' in locals():
-                            del custom_data
+                        # Efficient memory cleanup after each file
                         import gc
+                        del df
+                        if survey_type == "BRAND_TRACKER" and 'brand_data' in locals():
+                            del brand_data
+                        elif survey_type == "CUSTOM" and 'custom_data' in locals():
+                            del custom_data
                         gc.collect()
-                        logger.info(f"🧹 Memory cleanup completed")
+                        
+                        # Log memory after cleanup
+                        current_memory = psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024
+                        logger.info(f"🧹 Memory after cleanup: {current_memory:.1f} MB")
                     
                     except Exception as e:
                         logger.error(f"❌ Error processing CSV {csv_filename}: {e}")
