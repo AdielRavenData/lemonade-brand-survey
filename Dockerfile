@@ -40,4 +40,3 @@ EXPOSE 8080
 
 # Entry point - run the Flask application
 CMD exec gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 0 main:app
-
