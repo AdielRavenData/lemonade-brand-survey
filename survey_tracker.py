@@ -97,5 +97,3 @@ class SurveyTracker:
                 
         except Exception as e:
             logger.error(f"Error marking file as processed: {e}")
-
-
