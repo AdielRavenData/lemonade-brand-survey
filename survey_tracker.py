@@ -7,7 +7,7 @@ import logging
 import pandas as pd
 from datetime import datetime
 from typing import Dict, Optional
-from bigquery_client import BigqueryClient
+from cloud_utils.bigquery_client import BigqueryClient
 
 logger = logging.getLogger(__name__)
 
@@ -26,18 +26,8 @@ class SurveyTracker:
         """
         self.project_id = project_id
         
-        # Initialize BigqueryClient with proper configuration
-        # Define primary keys for tables that support upserts
-        primary_keys = {
-            'processed_brand_surveys': ['filename'],
-            'processed_custom_surveys': ['filename']
-        }
-        
-        # Define tables of interest for upsert operations
-        tables_of_interest = ['processed_brand_surveys', 'processed_custom_surveys']
-        
-        # Initialize the BigqueryClient
-        self.bq_client = BigqueryClient(primary_keys, tables_of_interest)
+        # Initialize the BigqueryClient (Raven Utils version)
+        self.bq_client = BigqueryClient(creds=None, config={})
         self.client = self.bq_client.client  # Keep backwards compatibility
         
         # Table references
@@ -61,15 +51,19 @@ class SurveyTracker:
         try:
             table_id = self.brand_table_id if survey_type == "BRAND_TRACKER" else self.custom_table_id
             
-            # Use BigqueryClient's read_table method with conditions
-            df = self.bq_client.read_table(table_id, conditions=f"filename = '{filename}'")
+            # Use BigqueryClient's run_query_to_df method
+            query = f"SELECT filename FROM `{table_id}` WHERE filename = '{filename}'"
+            df = self.bq_client.run_query_to_df(query, log_msg=f"Checking if {filename} is processed")
             
             # Return True if any rows found
             return len(df) > 0
             
         except Exception as e:
             logger.error(f"Error checking if file is processed: {e}")
-            # If we can't check, assume not processed to avoid skipping
+            # Log the table we were trying to query for debugging
+            logger.error(f"Failed to query table: {table_id}")
+            # If we can't check BigQuery, assume not processed to avoid data loss
+            # This is safer than assuming processed and skipping files
             return False
 
     def mark_processed(self, filename: str, survey_type: str):

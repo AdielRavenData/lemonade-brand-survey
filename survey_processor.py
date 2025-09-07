@@ -8,6 +8,8 @@ import pandas as pd
 import zipfile
 import logging
 import tempfile
+import psutil
+import os
 from pathlib import Path
 from datetime import datetime
 from google.cloud import bigquery
@@ -15,7 +17,7 @@ import re
 
 from custom_data_cleaner import CustomSurveyDataCleaner
 from survey_tracker import SurveyTracker
-from bigquery_client import BigqueryClient
+from cloud_utils.bigquery_client import BigqueryClient
 
 logger = logging.getLogger(__name__)
 
@@ -31,14 +33,9 @@ class SurveyProcessor:
         self.brand_dataset = brand_dataset
         self.custom_dataset = custom_dataset
         
-        # Initialize BigqueryClient 
-        # Since we're only doing APPEND operations, primary keys don't matter
+        # Initialize BigqueryClient (Raven Utils version)
         # Using minimal configuration for append-only operations
-        primary_keys = {}  # Empty - not needed for append operations
-        tables_of_interest = []  # Empty - not using UPSERT functionality
-        
-        # Initialize BigqueryClient
-        self.bq_client = BigqueryClient(primary_keys, tables_of_interest)
+        self.bq_client = BigqueryClient(creds=None, config={})
         self.client = self.bq_client.client  # Keep backwards compatibility
         
         # Initialize tracker and cleaner
@@ -577,6 +574,10 @@ class SurveyProcessor:
             dict: Processing result with detailed stats
         """
         try:
+            # Log initial memory usage
+            process = psutil.Process(os.getpid())
+            start_memory = process.memory_info().rss / 1024 / 1024
+            logger.info(f"🧠 Starting memory usage: {start_memory:.1f} MB")
             logger.info(f"🔄 Processing {survey_type} ZIP with individual CSV tracking: {original_filename}")
             
             # Extract DMA from ZIP filename
@@ -621,6 +622,7 @@ class SurveyProcessor:
                     try:
                         study_id = self.extract_study_id_from_csv_name(csv_filename)
                         df = pd.read_csv(csv_file)
+                        logger.info(f"📊 Loaded CSV with {len(df)} rows, {df.memory_usage(deep=True).sum() / 1024 / 1024:.1f} MB")
                         
                         if survey_type == "BRAND_TRACKER":
                             # Process brand tracker data
@@ -699,6 +701,16 @@ class SurveyProcessor:
                         
                         csv_files_processed.append(csv_filename)
                         logger.info(f"✅ Successfully processed CSV: {csv_filename}")
+                        
+                        # Force garbage collection after each file
+                        del df
+                        if 'brand_data' in locals():
+                            del brand_data
+                        if 'custom_data' in locals():
+                            del custom_data
+                        import gc
+                        gc.collect()
+                        logger.info(f"🧹 Memory cleanup completed")
                     
                     except Exception as e:
                         logger.error(f"❌ Error processing CSV {csv_filename}: {e}")
@@ -706,6 +718,11 @@ class SurveyProcessor:
                 
                 # Remove duplicates from tables_updated
                 tables_updated = list(set(tables_updated))
+                
+                # Log final memory usage
+                end_memory = process.memory_info().rss / 1024 / 1024
+                memory_diff = end_memory - start_memory
+                logger.info(f"🧠 Final memory usage: {end_memory:.1f} MB (change: {memory_diff:+.1f} MB)")
                 
                 return {
                     "status": "success",

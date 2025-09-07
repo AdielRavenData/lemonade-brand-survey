@@ -7,7 +7,7 @@ import os
 import logging
 import tempfile
 from pathlib import Path
-from google.cloud import storage
+from cloud_utils.CloudStorage_Client import CloudStorageClient
 from google.cloud.exceptions import NotFound
 from flask import Flask, request
 import json
@@ -46,7 +46,7 @@ def process_uploaded_file(bucket_name, file_name):
     # Initialize components
     tracker = SurveyTracker(PROJECT_ID)
     processor = SurveyProcessor(PROJECT_ID, BRAND_DATASET, CUSTOM_DATASET)
-    storage_client = storage.Client()
+    storage_client = CloudStorageClient(creds=None, headers_json=None)
     
     try:
         # Check if file is a ZIP
@@ -60,7 +60,7 @@ def process_uploaded_file(bucket_name, file_name):
         logger.info(f"🏷️  Detected survey type: {survey_type} for file: {file_name}")
         
         # Download file from GCS
-        bucket = storage_client.bucket(bucket_name)
+        bucket = storage_client.client.bucket(bucket_name)
         blob = bucket.blob(file_name)
         
         if not blob.exists():

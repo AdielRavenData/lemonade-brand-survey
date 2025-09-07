@@ -22,6 +22,12 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install Raven Utils with authentication
+# Note: Pass token as build arg: docker build --build-arg GITHUB_TOKEN=your_token .
+ARG GITHUB_USER=roihezkiRaven
+ARG GITHUB_TOKEN
+RUN pip install git+https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/AdminRavenData/Raven_Utils.git@main
+
 # Copy project files
 COPY . .
 
